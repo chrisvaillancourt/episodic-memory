@@ -49,6 +49,11 @@ export async function searchConversations(
     await initEmbeddings();
     const queryEmbedding = await generateEmbedding(query);
 
+    // When time filters are present, over-fetch from the kNN index since
+    // sqlite-vec applies k before SQL WHERE clauses filter results.
+    const kMultiplier = (after || before) ? 50 : 1;
+    const k = limit * kMultiplier;
+
     const stmt = db.prepare(`
       SELECT
         e.id,
@@ -66,10 +71,12 @@ export async function searchConversations(
         AND k = ?
         ${timeClause}
       ORDER BY vec.distance ASC
+      LIMIT ?
     `);
 
     results = stmt.all(
       Buffer.from(new Float32Array(queryEmbedding).buffer),
+      k,
       limit
     );
   }

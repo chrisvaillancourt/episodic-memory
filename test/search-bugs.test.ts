@@ -147,3 +147,81 @@ describe('Bug 2b: multi-concept similarity cascade', () => {
     }
   });
 });
+
+describe('Bug 1: kNN time filter under-fetch', () => {
+  let tmpDir: string;
+
+  beforeAll(async () => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'episodic-bug1-'));
+    process.env.EPISODIC_MEMORY_DB_PATH = path.join(tmpDir, 'test.db');
+    // large-conversation: ~180 exchanges on 2025-09-19 to 2025-09-20
+    // long-conversation: ~114 exchanges on 2025-10-08
+    // Combined: ~294 exchanges across 3 dates
+    await indexTestFiles([
+      getFixturePath('large-conversation.jsonl'),
+      getFixturePath('long-conversation.jsonl'),
+    ]);
+  }, 120_000);
+
+  afterAll(() => {
+    delete process.env.EPISODIC_MEMORY_DB_PATH;
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('should return requested number of results with after filter', async () => {
+    // after='2025-10-08' limits to ~114 exchanges from long-conversation
+    // Without fix: k=10 grabs 10 global nearest, few from 10-08 => under-return
+    const results = await searchConversations('code implementation', {
+      limit: 10,
+      mode: 'vector',
+      after: '2025-10-08'
+    });
+
+    expect(results.length).toBe(10);
+    results.forEach(r => {
+      expect(r.exchange.timestamp >= '2025-10-08').toBe(true);
+    });
+  });
+
+  it('should return requested number of results with before filter', async () => {
+    // before='2025-09-21' includes large-conversation (~180 exchanges)
+    // but excludes long-conversation (10-08)
+    const results = await searchConversations('implementation', {
+      limit: 10,
+      mode: 'vector',
+      before: '2025-09-21'
+    });
+
+    expect(results.length).toBe(10);
+    results.forEach(r => {
+      expect(r.exchange.timestamp <= '2025-09-21').toBe(true);
+    });
+  });
+
+  it('should return requested number of results with date range', async () => {
+    // Use before='2025-09-21' to include all of 2025-09-20
+    // (timestamps are ISO strings, so '2025-09-20T...' > '2025-09-20')
+    const results = await searchConversations('code', {
+      limit: 10,
+      mode: 'vector',
+      after: '2025-09-19',
+      before: '2025-09-21'
+    });
+
+    expect(results.length).toBe(10);
+    results.forEach(r => {
+      expect(r.exchange.timestamp >= '2025-09-19').toBe(true);
+      expect(r.exchange.timestamp <= '2025-09-21').toBe(true);
+    });
+  });
+
+  it('should still respect limit when no time filter is present', async () => {
+    const results = await searchConversations('code', {
+      limit: 5,
+      mode: 'vector'
+    });
+
+    expect(results.length).toBeLessThanOrEqual(5);
+    expect(results.length).toBeGreaterThan(0);
+  });
+});
