@@ -33,6 +33,10 @@ export async function searchConversations(query, options = {}) {
         // Vector similarity search
         await initEmbeddings();
         const queryEmbedding = await generateEmbedding(query);
+        // When time filters are present, over-fetch from the kNN index since
+        // sqlite-vec applies k before SQL WHERE clauses filter results.
+        const kMultiplier = (after || before) ? 50 : 1;
+        const k = limit * kMultiplier;
         const stmt = db.prepare(`
       SELECT
         e.id,
@@ -50,8 +54,9 @@ export async function searchConversations(query, options = {}) {
         AND k = ?
         ${timeClause}
       ORDER BY vec.distance ASC
+      LIMIT ?
     `);
-        results = stmt.all(Buffer.from(new Float32Array(queryEmbedding).buffer), limit);
+        results = stmt.all(Buffer.from(new Float32Array(queryEmbedding).buffer), k, limit);
     }
     if (mode === 'text' || mode === 'both') {
         // Text search
@@ -109,7 +114,7 @@ export async function searchConversations(query, options = {}) {
         const snippet = snippetText + (exchange.userMessage.length > 200 ? '...' : '');
         return {
             exchange,
-            similarity: mode === 'text' ? undefined : 1 - row.distance,
+            similarity: mode === 'text' ? undefined : Math.max(0, 1 - (row.distance ** 2) / 2),
             snippet,
             summary
         };
