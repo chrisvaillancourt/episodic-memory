@@ -113,9 +113,9 @@ describe('Integration Tests', () => {
 
       if (results.length > 0) {
         expect(results[0].similarity).toBeDefined();
-        // Similarity is 1 - distance, where distance can be > 1 for dissimilar items
-        // So similarity can be negative (valid for poor matches)
+        // Cosine similarity derived from L2 distance, clamped to [0, 1]
         expect(typeof results[0].similarity).toBe('number');
+        expect(results[0].similarity).toBeGreaterThanOrEqual(0);
         expect(results[0].similarity).toBeLessThanOrEqual(1);
       }
     });
